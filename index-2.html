@@ -1,0 +1,1373 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toon Story Maker</title>
+<style>
+  :root { --bg:#12131a; --card:#1d1f2b; --line:#2f3245; --text:#eef0f7; --mute:#9aa0b8; --acc:#ff7a45; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui, "Noto Sans Devanagari", sans-serif; }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 14px; display:grid; gap:14px; }
+  @media (min-width: 900px) { .wrap { grid-template-columns: 1fr 1fr; align-items:start; } .sticky { position: sticky; top: 10px; } }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--acc); }
+  .col { display:grid; gap:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; }
+  .stage { display:flex; justify-content:center; background:#000; border-radius:12px; overflow:hidden; }
+  .stage canvas { max-width:100%; max-height:70vh; display:block; }
+  label { font-size:12px; color:var(--mute); display:block; margin:8px 0 3px; }
+  input, select, button, textarea { font: inherit; color: var(--text); background:#14151d; border:1px solid var(--line); border-radius:8px; padding:8px; }
+  input[type=file] { width:100%; }
+  input[type=color] { padding:0; height:32px; width:44px; }
+  textarea { width:100%; }
+  button { cursor:pointer; background:#2a2d40; }
+  button.primary { background: var(--acc); border-color: var(--acc); color:#111; font-weight:600; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .scene { display:grid; grid-template-columns: 64px 1fr 1fr 1fr 34px; gap:6px; margin-bottom:6px; }
+  .scene select, .scene input { min-width:0; padding:6px 4px; }
+  .scene button { padding:4px; }
+  .scene .cast { grid-column: 1 / -1; margin: -2px 0 6px; }
+  .chr { padding:8px 0; border-top:1px solid var(--line); display:grid; gap:6px; }
+  .chr .ln { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .chr .nm { flex:1; min-width:100px; }
+  .small { font-size:12px; color:var(--mute); }
+  #status { font-size:13px; color:var(--mute); min-height:18px; margin-top:6px; }
+  progress { width:100%; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div style="grid-column:1/-1">
+    <h1>🎬 Toon Story Maker</h1>
+    <div class="small">Audio upload → story text → "Story samjho" → din/raat, jagah aur characters auto set → video download. Sab kuch aapke browser mein chalta hai (free, unlimited).</div>
+  </div>
+
+  <div class="card sticky">
+    <div class="stage"><canvas id="out"></canvas></div>
+    <div class="row" style="margin-top:10px">
+      <button id="playBtn" class="primary" disabled>▶ Preview</button>
+      <button id="stopBtn" disabled>■ Stop</button>
+      <button id="recBtn" class="primary" disabled>⏺ Video banao (download)</button>
+    </div>
+    <div id="status">Pehle audio chuno.</div>
+    <progress id="prog" value="0" max="1" style="display:none"></progress>
+  </div>
+
+  <div class="col">
+    <div class="card">
+      <h2>1. Audio</h2>
+      <label>Narration audio (mp3 / wav / m4a)</label>
+      <input type="file" id="audioFile" accept="audio/*">
+      <label>Background music (optional)</label>
+      <input type="file" id="musicFile" accept="audio/*">
+      <label>Music volume</label>
+      <input type="range" id="musicVol" min="0" max="0.5" step="0.01" value="0.12">
+    </div>
+
+    <div class="card">
+      <h2>2. Story text (timing ke saath)</h2>
+      <div class="small"><b>Sabse sahi tareeka:</b> apni story neeche paste karo, phir "Audio se text nikalo" dabao. Whisper sirf timing legi, subtitle mein aapka sahi text aayega. Story paste nahi ki to Whisper ka apna text aayega, jo Hindi mein galat ho sakta hai (Tiny model sabse kamzor hai).</div>
+      <label>Story text (optional, Hindi / English / Hinglish)</label>
+      <textarea id="storyText" rows="4" placeholder="Yahan apni kahani paste karo..."></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="timeBtn" disabled>📝 Mere text se timing banao</button>
+        <button id="subBtn" disabled>🎙 Audio se timing / text nikalo</button>
+      </div>
+      <div class="row">
+        <div><label>Bhasha</label><select id="lang"><option value="hindi">Hindi</option><option value="english">English</option><option value="">Auto detect</option></select></div>
+        <div><label>Whisper model</label><select id="model"><option value="Xenova/whisper-base">Base (~75MB)</option><option value="Xenova/whisper-small">Small (~250MB, Hindi mein behtar)</option><option value="Xenova/whisper-tiny">Tiny (~40MB, kamzor)</option></select></div>
+      </div>
+      <label>Cues (<code>start-end | text</code>, har line mein; edit kar sakte ho)</label>
+      <textarea id="cuesBox" rows="6"></textarea>
+      <label>Subtitle size</label>
+      <input type="range" id="subSize" min="28" max="80" value="46">
+    </div>
+
+    <div class="card">
+      <h2>Captions</h2>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="capOn" checked> Captions dikhao (video mein)</label>
+      <label>Caption ki bhasha</label>
+      <select id="capLang">
+        <option value="orig">Jaisa likha hai (Hindi / original)</option>
+        <option value="hing">Hinglish (Roman Hindi)</option>
+        <option value="en">English</option>
+      </select>
+      <div class="small" style="margin-top:6px">Hinglish apne aap ban jaata hai (Devanagari text se). English ke liye neeche apna English text paste karo (sabse sahi), ya khali chhodo to Whisper audio se translate karega (kam sahi).</div>
+      <label>English story text (optional)</label>
+      <textarea id="enText" rows="3" placeholder="Apni story ka English version yahan paste karo..."></textarea>
+      <div class="row" style="margin-top:8px"><button id="enBtn" disabled>🇬🇧 English captions banao</button></div>
+      <label>English cues (<code>start-end | text</code>, edit kar sakte ho)</label>
+      <textarea id="enBox" rows="4"></textarea>
+    </div>
+
+    <div class="card">
+      <h2>3. Story samjho (auto)</h2>
+      <button id="analyzeBtn" class="primary">🔍 Story samjho: din/raat, jagah, characters</button>
+      <div class="small" style="margin-top:6px">Story ke shabdon se (subah, raat, jungle, mahal, gaon...) scene aur background chunta hai, aur kirdaar dhoondhta hai. Neeche se jo characters chahiye wo chuno.</div>
+      <div id="chars" style="margin-top:8px"></div>
+      <button id="addChar" style="margin-top:8px">+ Character add karo</button>
+    </div>
+
+    <div class="card">
+      <h2>4. Scenes (auto, edit kar sakte ho)</h2>
+      <div class="small" style="margin-bottom:8px">Start second | samay | jagah | camera</div>
+      <div id="scenes"></div>
+      <button id="addScene">+ Scene add karo</button>
+    </div>
+
+    <div class="card">
+      <h2>5. Video format</h2>
+      <select id="aspect"><option value="v">Vertical 9:16 (Reels/Shorts)</option><option value="h">Horizontal 16:9 (YouTube)</option></select>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* =====================================================================
+   STORY ANALYSIS (pure JS, no network): time of day, location, characters
+   ===================================================================== */
+/* ANALYZE_START */
+const NORM = s => String(s).normalize('NFD').replace(/[़‌‍]/g, '').toLowerCase().replace(/ँ/g, 'ं');
+const NORMLIST = s => s.split(/\s+/).filter(Boolean).map(NORM);
+const RE_TOK = /[\p{L}\p{M}\p{N}]+/gu;
+const tokens = text => (String(text).match(RE_TOK) || []).map(o => ({ o, n: NORM(o) }));
+const cap = s => /^[a-z]/.test(s) ? s[0].toUpperCase() + s.slice(1) : s;
+
+// '~' prefix = weak keyword (weight 1), otherwise weight 2. Phrases (with a space) match as substrings.
+const TIME_RAW = {
+  night:   ['रात','रात्रि','रातों','रातें','आधी रात','अंधेरा','अंधेरी','अंधेरे','चाँद','चंद्रमा','चंदा','तारे','सितारे','तारों','night','midnight','moon','moonlight','moonlit','stars','starry','nighttime','bedtime','raat','chand','andhera','tare','~dark','~darkness'],
+  evening: ['शाम','सूर्यास्त','सूरज डूब','सूरज ढल','गोधूलि','evening','sunset','dusk','twilight','shaam','sham'],
+  morning: ['सुबह','सवेरा','सवेरे','भोर','सूर्योदय','सूरज निकल','morning','sunrise','dawn','daybreak','subah','savera'],
+  day:     ['दोपहर','धूप','दिनभर','noon','afternoon','daytime','sunny','sunshine','dopahar','~दिन','~day','~din'],
+};
+const LOC_RAW = {
+  forest:   ['जंगल','जंगलों','वन','जंगली','forest','jungle','woods','woodland','jangal'],
+  ocean:    ['समुद्र','सागर','समंदर','समुंदर','समुद्री','बीच','लहरें','लहर','जहाज','द्वीप','sea','ocean','beach','shore','waves','ship','island','samundar','sagar'],
+  village:  ['गाँव','गांव','खेत','खेतों','किसान','झोपड़ी','village','farm','farmer','barn','gaon','khet'],
+  city:     ['शहर','सड़क','बाज़ार','बाजार','इमारत','बिल्डिंग','city','town','street','road','market','building','traffic','mall','shehar','sadak'],
+  home:     ['घर','कमरा','कमरे','रसोई','बिस्तर','खिड़की','बेडरूम','room','house','home','kitchen','bed','bedroom','ghar','kamra'],
+  castle:   ['महल','किला','किले','दरबार','राजमहल','राज्य','castle','palace','fort','kingdom','throne','mahal','qila'],
+  mountain: ['पहाड़','पहाड़ी','पर्वत','पहाड़ों','चोटी','mountain','mountains','hill','hills','peak','cliff','pahad','parvat'],
+  river:    ['नदी','दरिया','झील','तालाब','नहर','झरना','नाव','river','lake','pond','stream','waterfall','boat','nadi','talab'],
+  school:   ['स्कूल','विद्यालय','कक्षा','क्लास','school','class','classroom','teacher','shiksha'],
+  desert:   ['रेगिस्तान','मरुस्थल','रेत','ऊँट','desert','dunes','camel','sahara','registan'],
+  snow:     ['बर्फ','हिमपात','बर्फीला','बर्फीली','snow','snowy','ice','winter','blizzard','snowman','barf'],
+  space:    ['अंतरिक्ष','आकाशगंगा','ग्रह','रॉकेट','एलियन','space','galaxy','planet','rocket','astronaut','spaceship','alien','antariksh'],
+  meadow:   ['बगीचा','बाग','मैदान','घास','फूल','फूलों','garden','meadow','park','grass','flowers','bagicha','maidan'],
+};
+const compileKw = raw => Object.fromEntries(Object.entries(raw).map(([k, list]) => [k, list.map(w => {
+  let wt = 2; if (w[0] === '~') { wt = 1; w = w.slice(1); }
+  w = NORM(w); return { w, wt, ph: /\s/.test(w) };
+})]));
+const TIME_C = compileKw(TIME_RAW), LOC_C = compileKw(LOC_RAW);
+const TIMELOC_WORDS = new Set();
+[TIME_C, LOC_C].forEach(t => Object.values(t).forEach(l => l.forEach(e => { if (!e.ph) TIMELOC_WORDS.add(e.w); })));
+
+function pickBest(tab, tk, text) {
+  let best = null, bs = 0, bl = -1;
+  for (const k in tab) {
+    let s = 0, l = -1;
+    for (const e of tab[k]) {
+      if (e.ph) { const i = text.indexOf(e.w); if (i >= 0) { s += e.wt; l = Math.max(l, i / (text.length + 1)); } }
+      else for (let i = 0; i < tk.length; i++) if (tk[i] === e.w) { s += e.wt; l = Math.max(l, i / (tk.length + 1)); }
+    }
+    if (s > bs || (s === bs && s > 0 && l > bl)) { best = k; bs = s; bl = l; }
+  }
+  return best;
+}
+
+// key, character kind, words (first word = Hindi label)
+const ROLE_RAW = [
+  ['king','king','राजा महाराज बादशाह सुलतान king sultan raja badshah'],
+  ['queen','queen','रानी महारानी queen rani'],
+  ['prince','king','राजकुमार prince rajkumar'],
+  ['princess','queen','राजकुमारी princess rajkumari'],
+  ['boy','boy','लड़का लड़के बेटा बालक बच्चा बच्चे बच्चों boy ladka beta bachcha'],
+  ['girl','girl','लड़की बेटी बच्ची बालिका girl ladki beti'],
+  ['mother','woman','माँ माता मम्मी mother mom mummy maa'],
+  ['father','man','पिता पापा पिताजी father dad papa'],
+  ['grandma','elder','दादी नानी बुढ़िया grandmother grandma dadi nani'],
+  ['grandpa','elder','दादा नाना बूढ़ा grandfather grandpa dada'],
+  ['farmer','man','किसान farmer kisan'],
+  ['teacher','man','शिक्षक टीचर अध्यापक मास्टर teacher'],
+  ['doctor','man','डॉक्टर वैद्य doctor'],
+  ['witch','woman','चुड़ैल डायन witch'],
+  ['wizard','elder','जादूगर wizard magician'],
+  ['fairy','girl','परी fairy pari'],
+  ['demon','man','राक्षस दैत्य giant monster demon rakshas'],
+  ['lion','lion','शेर बाघ lion tiger sher'],
+  ['mouse','mouse','चूहा चूहे चुहिया mouse rat chuha'],
+  ['rabbit','rabbit','खरगोश rabbit bunny khargosh'],
+  ['cat','cat','बिल्ली cat kitten billi'],
+  ['dog','dog','कुत्ता कुत्ते पिल्ला dog puppy kutta'],
+  ['bear','bear','भालू bear bhalu'],
+  ['monkey','monkey','बंदर बन्दर monkey bandar'],
+  ['elephant','elephant','हाथी elephant hathi'],
+  ['fox','fox','लोमड़ी fox lomdi'],
+  ['bird','bird','चिड़िया कौआ कौवा तोता मोर कबूतर बतख उल्लू bird crow parrot sparrow duck peacock owl chidiya'],
+  ['tortoise','tortoise','कछुआ कछुवा tortoise turtle kachua'],
+];
+const ROLES = ROLE_RAW.map(([key, kind, w]) => ({ key, kind, hi: w.split(' ')[0], words: NORMLIST(w) }));
+const ROLE_OF = new Map();
+ROLES.forEach((r, i) => r.words.forEach(w => { if (!ROLE_OF.has(w)) ROLE_OF.set(w, i); }));
+
+const HI_STOP = new Set(NORMLIST('वह वो उसने उसे उसका उसकी उसके उन्होंने उनका तब फिर तो और पर लेकिन तभी जब कब यह ये इसने इसे इसका हम तुम आप मैं मैंने मुझे तुमने सब सबने कोई किसी एक अब जी हां हाँ नहीं ही भी तक सभी सबको वहां वहाँ यहां यहाँ तुम्हें हमने मेरे मेरा मेरी तेरा आपने कभी कुछ क्या कैसे क्यों कौन ने को से का की के में था थी थे है हैं हो गया गई गए तभी इसलिए अचानक'));
+const EN_STOP = new Set(NORMLIST('hello hi hey dear please thank thanks sorry welcome look come let okay well wow help stop wait the a an i he she it they we you but and so then when one once suddenly in on at this that there here oh yes no his her their my our your what why how who where after before while if as with from to of for by is was were are be being been monday tuesday wednesday thursday friday saturday sunday january february march april may june july august september october november december'));
+const HI_SPEECH = new Set(NORMLIST('कहा बोला बोली बोले पूछा पूछी पूछे चिल्लाया चिल्लाई सोचा सोची हंसा हंसी रोया रोई मुस्कुराया मुस्कुराई बताया बताई चीखा चीखी फुसफुसाया बुदबुदाया kaha bola boli pucha puchi'));
+const HI_FEM = new Set(NORMLIST('बोली पूछी चिल्लाई सोची हंसी रोई मुस्कुराई बताई चीखी boli puchi'));
+const EN_SPEECH = new Set(NORMLIST('said asked replied shouted whispered cried laughed thought exclaimed answered yelled muttered smiled'));
+const NAME_POST = new Set(NORMLIST('का की के ka ki ke'));
+
+function isCand(t) {
+  if (!t) return false;
+  if (/^[A-Za-z]+$/.test(t.o)) return /^[A-Z][a-z]{2,}$/.test(t.o) && !EN_STOP.has(t.n) && !ROLE_OF.has(t.n) && !EN_SPEECH.has(t.n);
+  return t.n.length >= 2 && !/^\p{N}+$/u.test(t.n) && !HI_STOP.has(t.n) && !ROLE_OF.has(t.n) && !HI_SPEECH.has(t.n) && !TIMELOC_WORDS.has(t.n) && t.n !== 'नाम';
+}
+
+function findCharacters(cues) {
+  const lines = cues.map(c => c.t);
+  const roleCount = {}, roleFirst = {}, names = {};
+  const bump = (tok, sc) => {
+    const o = names[tok.n] || (names[tok.n] = { label: cap(tok.o), n: tok.n, score: 0, fem: 0, masc: 0, role: null });
+    o.score += sc; return o;
+  };
+  const findRole = (tk, at) => {
+    for (let k = at - 1; k >= Math.max(0, at - 8); k--) if (ROLE_OF.has(tk[k].n)) return ROLE_OF.get(tk[k].n);
+    for (let k = at + 1; k <= Math.min(tk.length - 1, at + 4); k++) if (ROLE_OF.has(tk[k].n)) return ROLE_OF.get(tk[k].n);
+    return null;
+  };
+  const allTok = [];
+  for (const line of lines) {
+    const tk = tokens(line);
+    tk.forEach(t => allTok.push(t.n));
+    for (let i = 0; i < tk.length; i++) {
+      const t = tk[i], n = t.n;
+      const ro = ROLE_OF.get(n);
+      if (ro !== undefined) { roleCount[ro] = (roleCount[ro] || 0) + 1; if (!(ro in roleFirst)) roleFirst[ro] = t.o; }
+      // "रामू नाम का लड़का" / "उसका नाम राहुल था" / "named Tom" / "name was Lily"
+      if (n === 'नाम' || n === 'naam') {
+        let at = -1;
+        if (tk[i + 1] && NAME_POST.has(tk[i + 1].n) && isCand(tk[i - 1])) at = i - 1;
+        else if (isCand(tk[i + 1])) at = i + 1;
+        if (at >= 0) {
+          const o = bump(tk[at], 3);
+          const r = findRole(tk, at); if (r !== null) o.role = r;
+          for (let k = at + 1; k <= Math.min(tk.length - 1, at + 4); k++) { if (tk[k].n === 'थी') { o.fem++; break; } if (tk[k].n === 'था') { o.masc++; break; } }
+        }
+      } else if (n === 'named' || (n === 'name' && tk[i + 1] && (tk[i + 1].n === 'was' || tk[i + 1].n === 'is'))) {
+        const at = n === 'named' ? i + 1 : i + 2;
+        if (isCand(tk[at])) { const o = bump(tk[at], 3); const r = findRole(tk, at); if (r !== null) o.role = r; }
+      }
+      // "रामू ने कहा" / "रामू बोला" (Hindi), "Tom said" / "said Tom" (English)
+      if (HI_SPEECH.has(n)) {
+        let k = i - 1; if (tk[k] && (tk[k].n === 'ने' || tk[k].n === 'ne')) k--;
+        if (isCand(tk[k])) { const o = bump(tk[k], 2); if (HI_FEM.has(n)) o.fem++; else o.masc++; }
+      }
+      if (EN_SPEECH.has(n)) {
+        if (isCand(tk[i - 1])) bump(tk[i - 1], 2);
+        else if (isCand(tk[i + 1])) bump(tk[i + 1], 2);
+      }
+    }
+    // capitalised English words in the middle of a sentence
+    for (const m of line.matchAll(/(?<=[a-z,;:]\s)[A-Z][a-z]{2,}\b/g)) {
+      const tok = { o: m[0], n: NORM(m[0]) };
+      if (isCand(tok)) bump(tok, 1);
+    }
+  }
+  const countOf = al => { const s = new Set(al); let c = 0; for (const x of allTok) if (s.has(x)) c++; return c; };
+  const out = [], merged = new Set();
+  for (const o of Object.values(names)) {
+    if (o.score < 2) continue;
+    const aliases = [o.n];
+    let kind = o.fem > o.masc ? 'girl' : 'boy';
+    if (o.role !== null) { kind = ROLES[o.role].kind; aliases.push(...ROLES[o.role].words); merged.add(o.role); }
+    out.push({ label: o.label, kind, aliases, count: countOf(aliases) });
+  }
+  for (const [r, c] of Object.entries(roleCount)) {
+    const R = ROLES[+r]; if (merged.has(+r)) continue;
+    const first = roleFirst[r];
+    out.push({ label: /[ऀ-ॿ]/.test(first) ? R.hi : cap(first), kind: R.kind, aliases: R.words, count: c });
+  }
+  out.sort((a, b) => b.count - a.count);
+  return out;
+}
+
+function mentionsOf(text, list) {
+  const tk = tokens(text).map(t => t.n), found = [];
+  for (const c of list) {
+    const idx = tk.findIndex(x => c.al.has(x));
+    if (idx >= 0) found.push([idx, c.id]);
+  }
+  found.sort((a, b) => a[0] - b[0]);
+  return found.map(f => f[1]);
+}
+
+function segmentTimeline(cues) {
+  const info = cues.map(c => { const tk = tokens(c.t).map(x => x.n), tx = NORM(c.t); return { t: pickBest(TIME_C, tk, tx), l: pickBest(LOC_C, tk, tx) }; });
+  let curT = (info.find(i => i.t) || {}).t || 'day', curL = (info.find(i => i.l) || {}).l || 'meadow';
+  const per = info.map(i => { if (i.t) curT = i.t; if (i.l) curL = i.l; return { time: curT, loc: curL }; });
+  const groups = [];
+  per.forEach((p, i) => {
+    const g = groups[groups.length - 1];
+    if (g && g.time === p.time && g.loc === p.loc) g.end = cues[i].e;
+    else groups.push({ start: groups.length ? cues[i].s : 0, end: cues[i].e, time: p.time, loc: p.loc });
+  });
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 1; i < groups.length; i++) if (groups[i].end - groups[i].start < 3) { groups[i - 1].end = groups[i].end; groups.splice(i, 1); changed = true; break; }
+  }
+  for (let i = 1; i < groups.length;) {
+    const a = groups[i - 1], b = groups[i];
+    if (a.time === b.time && a.loc === b.loc) { a.end = b.end; groups.splice(i, 1); } else i++;
+  }
+  return groups;
+}
+/* ANALYZE_END */
+
+/* =====================================================================
+   CONSTANTS / UI TABLES
+   ===================================================================== */
+const TIMES_UI = { morning:'🌅 Subah', day:'☀️ Din', evening:'🌇 Shaam', night:'🌙 Raat' };
+const LOCS_UI = { meadow:'Maidan / Bagh', forest:'Jungle', village:'Gaon / Khet', city:'Shehar', home:'Ghar (andar)', castle:'Mahal', mountain:'Pahaad', river:'Nadi', school:'School', desert:'Registan', snow:'Barf', ocean:'Samundar', space:'Space' };
+const CAMS = {
+  auto:  { name:'Auto', p:[0,1.7,5.2], l:[0,1.5,0] },
+  front: { name:'Front', p:[0,1.7,5.2], l:[0,1.5,0] },
+  close: { name:'Close-up', p:[0,2.2,2.7], l:[0,2.15,0] },
+  left:  { name:'Left', p:[-3.2,1.7,4.3], l:[0,1.5,0] },
+  right: { name:'Right', p:[3.2,1.7,4.3], l:[0,1.5,0] },
+  wide:  { name:'Wide', p:[0,2.4,8.5], l:[0,1.3,0] },
+  low:   { name:'Low hero', p:[0,0.5,4.6], l:[0,1.9,0] },
+};
+// kind: [label, skin/fur, hair/extra]
+const KINDS = {
+  boy:['Ladka','#f2c19b','#2b1b12'], girl:['Ladki','#f4c7a4','#3a1f12'], man:['Aadmi','#e5b48c','#1d1410'], woman:['Aurat','#f1c09a','#2a1710'],
+  elder:['Bujurg','#e8bf9c','#e9e9ee'], king:['Raja','#efbf94','#8a6a3a'], queen:['Rani','#f3c8a6','#5b2a1a'],
+  lion:['Sher','#e8a53c','#a85d12'], cat:['Billi','#f0a860','#7a4a20'], dog:['Kutta','#d9b38a','#6b4426'], bear:['Bhalu','#8b5a35','#5a3920'],
+  mouse:['Chuha','#b8bcc8','#e8a1b4'], rabbit:['Khargosh','#f4f1ee','#e6a1b4'], monkey:['Bandar','#a9693a','#6b3f20'],
+  elephant:['Haathi','#aeb6c4','#8a93a3'], fox:['Lomdi','#ee8a35','#a04a10'], bird:['Chidiya','#ffd23f','#e8a31a'], tortoise:['Kachua','#8fc16a','#4f8f3a'],
+};
+const ANIMAL = new Set(['lion','cat','dog','bear','mouse','rabbit','monkey','elephant','fox','bird','tortoise']);
+const SHIRTS = ['#4aa3ff','#ff6b6b','#ffd166','#06d6a0','#b388ff','#ff9f43','#2ec4b6','#e56b9a'];
+const HAIRS = ['#2b1b12','#5a3a22','#111111','#a0522d','#c9a227'];
+
+// time-of-day look (sky colours, sun/moon, light)
+const TV = {
+  morning:{ top:'#7fb6ff', bot:'#ffd9a8', night:.15, sunX:.2,  sunY:.64, sunA:1, moonA:0, hemi:'#ffe6c8', gnd:'#7a6a5a', hi:1.0,  sun:'#ffcf9a', si:1.4 },
+  day:    { top:'#3f9cff', bot:'#cfeaff', night:0,   sunX:.62, sunY:.16, sunA:1, moonA:0, hemi:'#ffffff', gnd:'#6a7a8a', hi:1.15, sun:'#ffffff', si:1.7 },
+  evening:{ top:'#3b2a73', bot:'#ff8a4f', night:.4,  sunX:.8,  sunY:.62, sunA:1, moonA:0, hemi:'#ffc9a3', gnd:'#4a3a5a', hi:.95,  sun:'#ff9a5a', si:1.2 },
+  night:  { top:'#04061a', bot:'#1a2352', night:1,   sunX:.8,  sunY:.9,  sunA:0, moonA:1, hemi:'#8394ff', gnd:'#0c1030', hi:.75,  sun:'#9fb2ff', si:.7 },
+};
+const GROUND = { meadow:'#6bbf59', forest:'#3f8a3a', village:'#86c05a', city:'#4b5060', home:'#b98a5b', castle:'#7fae6a', mountain:'#6f9a5a', river:'#6bbf59', school:'#78b865', desert:'#e2c27d', snow:'#f1f5ff', ocean:'#f0dca0', space:'#4a4a5c' };
+
+/* =====================================================================
+   STATE
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const status = t => { $('status').textContent = t; };
+const esc = s => String(s).replace(/[&<>"]/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[m]));
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+let W = 720, H = 1280;
+let chars = [], nextId = 1;
+let scenes = [{ start:0, time:'day', loc:'meadow', cam:'auto' }];
+let sceneCast = [[]];
+let cues = [], cueMeta = [];
+let focusId = null;
+
+/* =====================================================================
+   THREE.JS SETUP
+   ===================================================================== */
+const renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true, preserveDrawingBuffer:true });
+renderer.setClearColor(0x000000, 0);
+const scene3 = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 120);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x556070, 1.1); scene3.add(hemi);
+const sunL = new THREE.DirectionalLight(0xffffff, 1.6); sunL.position.set(3, 6, 5); scene3.add(sunL);
+
+const out = $('out');
+const ctx2d = out.getContext('2d');
+
+const groundMat = new THREE.MeshStandardMaterial({ color:'#6bbf59', roughness:1, flatShading:true });
+const ground = new THREE.Mesh(new THREE.CircleGeometry(45, 48), groundMat);
+ground.rotation.x = -Math.PI / 2; ground.position.y = -.62; scene3.add(ground);
+
+const envGroup = new THREE.Group(); scene3.add(envGroup);
+const winMats = [], animated = [];
+let envLoc = null, homeGlass = null;
+
+/* ---------- characters ---------- */
+function makeChar(sp) {
+  const K = sp.kind, g = new THREE.Group();
+  const M = (c, r = .6) => new THREE.MeshStandardMaterial({ color:c, roughness:r });
+  const skinM = M(sp.skin), shirtM = M(sp.shirt), hairM = M(sp.hair, .85), pantsM = M('#2f3b6b'), white = M('#fff', .3), black = M('#111', .3);
+  const O = { group:g, eyes:[], x:0, s:1, ph:Math.random() * 6, trunk:null };
+  const mesh = (geo, mat, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); return m; };
+  const animal = ANIMAL.has(K);
+
+  g.add(mesh(new THREE.CapsuleGeometry(.58, .9, 8, 20), shirtM, 0, 1.0, 0));
+  for (const x of [-.25, .25]) {
+    g.add(mesh(new THREE.CylinderGeometry(.2, .2, .9, 16), pantsM, x, .1, 0));
+    const shoe = mesh(new THREE.SphereGeometry(.26, 16, 12), white, x, -.38, .1); shoe.scale.set(1, .6, 1.4); g.add(shoe);
+  }
+  const sh = mesh(new THREE.CircleGeometry(.95, 24), new THREE.MeshBasicMaterial({ color:0x000000, transparent:true, opacity:.25 }), 0, -.55, 0);
+  sh.rotation.x = -Math.PI / 2; g.add(sh);
+
+  O.armL = new THREE.Group(); O.armR = new THREE.Group();
+  for (const [arm, x] of [[O.armR, .72], [O.armL, -.72]]) {
+    arm.position.set(x, 1.55, 0);
+    arm.add(mesh(new THREE.CylinderGeometry(.14, .14, .85, 12), shirtM, 0, -.42, 0));
+    arm.add(mesh(new THREE.SphereGeometry(.17, 16, 12), skinM, 0, -.9, 0));
+    g.add(arm);
+  }
+
+  const head = new THREE.Group(); head.position.y = 2.35; g.add(head); O.head = head;
+  head.add(new THREE.Mesh(new THREE.SphereGeometry(.85, 40, 32), skinM));
+
+  if (!animal) {
+    const hair = mesh(new THREE.SphereGeometry(.89, 40, 20, 0, Math.PI * 2, 0, Math.PI * .52), hairM, 0, .03, 0);
+    hair.rotation.x = -.3; head.add(hair);
+  }
+  for (const x of [-.3, .3]) {
+    const eye = new THREE.Group(); eye.position.set(x, .14, .7);
+    const w = new THREE.Mesh(new THREE.SphereGeometry(.18, 20, 16), white); w.scale.z = .55; eye.add(w);
+    eye.add(mesh(new THREE.SphereGeometry(.085, 16, 12), black, 0, 0, .07));
+    head.add(eye); O.eyes.push(eye);
+    if (!animal) {
+      const brow = mesh(new THREE.BoxGeometry(.3, .06, .06), hairM, x, .43, .72); brow.rotation.z = x > 0 ? -.12 : .12; head.add(brow);
+    }
+    const cheek = mesh(new THREE.SphereGeometry(.1, 12, 10), M('#ff8fa3'), x * 1.5, -.12, .7); cheek.scale.set(1, .6, .3); head.add(cheek);
+  }
+  head.add(mesh(new THREE.SphereGeometry(.09, 12, 10), K === 'fox' || K === 'cat' || K === 'dog' || K === 'bear' ? black : skinM, 0, -.05, .84));
+  O.mouth = mesh(new THREE.SphereGeometry(.2, 24, 16), M('#6b1020', .5), 0, -.38, .72);
+  O.mouth.scale.set(1, .12, .4); head.add(O.mouth);
+
+  const gold = new THREE.MeshStandardMaterial({ color:'#ffd23f', roughness:.3, metalness:.6 });
+  const crown = () => {
+    head.add(mesh(new THREE.CylinderGeometry(.5, .45, .3, 5, 1, true), gold, 0, .93, 0));
+    for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; head.add(mesh(new THREE.SphereGeometry(.07, 8, 6), gold, Math.sin(a) * .5, 1.1, Math.cos(a) * .5)); }
+  };
+  const earSph = (x, y, r, mat, sx = 1, sy = 1, sz = .6) => { const e = mesh(new THREE.SphereGeometry(r, 16, 12), mat, x, y, 0); e.scale.set(sx, sy, sz); head.add(e); return e; };
+  const cone = (x, y, r, h, mat, rz) => { const c = mesh(new THREE.ConeGeometry(r, h, 10), mat, x, y, 0); c.rotation.z = rz; head.add(c); return c; };
+  const pink = M('#ffb3c1');
+
+  switch (K) {
+    case 'girl':
+      for (const x of [-1, 1]) head.add(mesh(new THREE.SphereGeometry(.26, 14, 12), hairM, x * .88, .1, -.1));
+      break;
+    case 'woman':
+      head.add(mesh(new THREE.SphereGeometry(.3, 14, 12), hairM, 0, .98, -.2));
+      break;
+    case 'queen': {
+      const back = mesh(new THREE.SphereGeometry(.9, 20, 14), hairM, 0, -.2, -.35); back.scale.set(1.05, 1.15, .7); head.add(back);
+      crown(); break;
+    }
+    case 'king': {
+      const beard = mesh(new THREE.SphereGeometry(.5, 16, 12), hairM, 0, -.55, .4); beard.scale.set(1, .7, .6); head.add(beard);
+      crown(); break;
+    }
+    case 'man': {
+      const mu = mesh(new THREE.SphereGeometry(.2, 12, 10), hairM, 0, -.2, .8); mu.scale.set(1.5, .35, .5); head.add(mu); break;
+    }
+    case 'elder': {
+      const gl = M('#222', .4);
+      for (const x of [-.3, .3]) head.add(mesh(new THREE.TorusGeometry(.2, .03, 8, 20), gl, x, .14, .8));
+      head.add(mesh(new THREE.BoxGeometry(.2, .03, .03), gl, 0, .16, .82)); break;
+    }
+    case 'cat':
+      cone(-.5, .8, .24, .5, skinM, .35); cone(.5, .8, .24, .5, skinM, -.35);
+      cone(-.5, .78, .13, .3, hairM, .35); cone(.5, .78, .13, .3, hairM, -.35); break;
+    case 'fox': {
+      cone(-.5, .8, .26, .55, skinM, .35); cone(.5, .8, .26, .55, skinM, -.35);
+      cone(-.5, .76, .13, .3, hairM, .35); cone(.5, .76, .13, .3, hairM, -.35);
+      const mz = mesh(new THREE.SphereGeometry(.4, 16, 12), white, 0, -.3, .55); mz.scale.set(.9, .55, .6); head.add(mz); break;
+    }
+    case 'dog':
+      earSph(-.84, .1, .3, hairM, .8, 1.7, .5); earSph(.84, .1, .3, hairM, .8, 1.7, .5); break;
+    case 'bear':
+      earSph(-.6, .68, .27, skinM, 1, 1, .8); earSph(.6, .68, .27, skinM, 1, 1, .8);
+      earSph(-.6, .68, .15, hairM, 1, 1, 1.1); earSph(.6, .68, .15, hairM, 1, 1, 1.1); break;
+    case 'mouse':
+      earSph(-.62, .72, .4, skinM, 1, 1, .4); earSph(.62, .72, .4, skinM, 1, 1, .4);
+      earSph(-.62, .72, .26, hairM, 1, 1, .6); earSph(.62, .72, .26, hairM, 1, 1, .6); break;
+    case 'rabbit':
+      for (const x of [-.3, .3]) {
+        const e = mesh(new THREE.CapsuleGeometry(.14, .75, 6, 12), skinM, x, 1.3, 0); e.rotation.z = x > 0 ? -.12 : .12; head.add(e);
+        const i = mesh(new THREE.CapsuleGeometry(.07, .6, 6, 12), hairM, x, 1.3, .1); i.rotation.z = x > 0 ? -.12 : .12; head.add(i);
+      } break;
+    case 'monkey': {
+      earSph(-.88, .1, .28, skinM, 1, 1, .8); earSph(.88, .1, .28, skinM, 1, 1, .8);
+      const fp = mesh(new THREE.SphereGeometry(.55, 16, 12), M('#f5d6b0'), 0, -.12, .45); fp.scale.set(.95, .8, .5); head.add(fp); break;
+    }
+    case 'elephant': {
+      for (const x of [-1, 1]) {
+        const e = mesh(new THREE.CylinderGeometry(.55, .55, .08, 20), skinM, x * .92, .1, -.05); e.rotation.z = Math.PI / 2; e.rotation.y = x * .4; head.add(e);
+      }
+      const tr = new THREE.Group(); tr.position.set(0, -.15, .8); tr.add(mesh(new THREE.CylinderGeometry(.14, .09, .9, 12), skinM, 0, -.4, 0)); head.add(tr); O.trunk = tr; break;
+    }
+    case 'lion': {
+      head.add(mesh(new THREE.SphereGeometry(1.02, 28, 20), hairM, 0, 0, -.2));
+      earSph(-.55, .7, .2, skinM, 1, 1, .8); earSph(.55, .7, .2, skinM, 1, 1, .8); break;
+    }
+    case 'bird': {
+      const b = mesh(new THREE.ConeGeometry(.15, .4, 12), M('#ff9f1c'), 0, -.12, 1.0); b.rotation.x = Math.PI / 2; head.add(b);
+      for (const x of [-.12, 0, .12]) head.add(mesh(new THREE.ConeGeometry(.07, .35, 8), hairM, x, .95, 0));
+      break;
+    }
+    case 'tortoise': {
+      const sell = mesh(new THREE.SphereGeometry(.85, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), hairM, 0, 1.15, -.7);
+      sell.rotation.x = -Math.PI / 2; g.add(sell); break;
+    }
+    default: break;
+  }
+  return O;
+}
+
+const newChar = (name, kind, count = 0, aliases = [], idx = chars.length) => {
+  const k = KINDS[kind] ? kind : 'boy';
+  const human = !ANIMAL.has(k);
+  return {
+    id: 'c' + (nextId++), name, kind: k, count, aliases: aliases.length ? aliases : [NORM(name.split(/\s+/)[0])],
+    skin: KINDS[k][1], shirt: SHIRTS[idx % SHIRTS.length],
+    hair: (human && !['elder', 'king', 'queen'].includes(k) && k !== 'woman' && k !== 'man') ? HAIRS[idx % HAIRS.length] : KINDS[k][2],
+    on: true, obj: null,
+  };
+};
+function buildObj(c) {
+  if (c.obj) scene3.remove(c.obj.group);
+  c.obj = makeChar(c);
+  c.obj.group.visible = false;
+  scene3.add(c.obj.group);
+}
+
+/* ---------- environments ---------- */
+const std = (c, o) => new THREE.MeshStandardMaterial(Object.assign({ color:c, roughness:.85, flatShading:true }, o || {}));
+const mesh3 = (geo, mat, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); return m; };
+function rng(seed) { return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
+function glowMat(color = '#ffd56b', k = 1) { const m = std('#555', { emissive:color, emissiveIntensity:0 }); m.userData.k = k; winMats.push(m); return m; }
+
+function treeRound(s, c = '#3fa34d') {
+  const g = new THREE.Group();
+  g.add(mesh3(new THREE.CylinderGeometry(.12 * s, .17 * s, s, 8), std('#7a4a2a'), 0, .5 * s, 0));
+  g.add(mesh3(new THREE.IcosahedronGeometry(.75 * s, 0), std(c), 0, 1.5 * s, 0));
+  return g;
+}
+function pine(s, snow) {
+  const g = new THREE.Group();
+  g.add(mesh3(new THREE.CylinderGeometry(.1 * s, .14 * s, .6 * s, 8), std('#6b4226'), 0, .3 * s, 0));
+  for (let i = 0; i < 3; i++) g.add(mesh3(new THREE.ConeGeometry((.85 - i * .2) * s, (1.1 - i * .1) * s, 8), std(snow && i > 0 ? '#eef4fb' : '#2f7d46'), 0, (.9 + i * .65) * s, 0));
+  return g;
+}
+function house(w, h, d, wall, roof) {
+  const g = new THREE.Group();
+  g.add(mesh3(new THREE.BoxGeometry(w, h, d), std(wall), 0, h / 2, 0));
+  const r = mesh3(new THREE.ConeGeometry(Math.max(w, d) * .78, h * .6, 4), std(roof), 0, h + h * .3, 0); r.rotation.y = Math.PI / 4; g.add(r);
+  g.add(mesh3(new THREE.BoxGeometry(w * .2, h * .45, .08), std('#5a3a22'), 0, h * .225, d / 2 + .02));
+  const gm = glowMat();
+  g.add(mesh3(new THREE.BoxGeometry(w * .2, h * .2, .08), gm, -w * .3, h * .6, d / 2 + .02));
+  g.add(mesh3(new THREE.BoxGeometry(w * .2, h * .2, .08), gm, w * .3, h * .6, d / 2 + .02));
+  return g;
+}
+let WIN_TEX = null;
+function winTextures() {
+  if (WIN_TEX) return WIN_TEX;
+  const r = rng(99), pat = [];
+  for (let i = 0; i < 6 * 12; i++) pat.push(r() < .55);
+  const mk = lit => {
+    const c = document.createElement('canvas'); c.width = 128; c.height = 256;
+    const x = c.getContext('2d');
+    x.fillStyle = lit ? '#000' : '#3a4152'; x.fillRect(0, 0, 128, 256);
+    for (let row = 0; row < 12; row++) for (let col = 0; col < 6; col++) {
+      if (lit && !pat[row * 6 + col]) continue;
+      x.fillStyle = lit ? '#ffd56b' : '#8fb4d8';
+      x.fillRect(col * 21 + 5, row * 21 + 5, 12, 13);
+    }
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; return t;
+  };
+  WIN_TEX = { base: mk(false), emi: mk(true) };
+  return WIN_TEX;
+}
+function building(w, h, d) {
+  const { base, emi } = winTextures();
+  const b = base.clone(); b.needsUpdate = true; b.repeat.set(Math.max(1, Math.round(w / 1.5)), Math.max(1, Math.round(h / 2.4)));
+  const e = emi.clone(); e.needsUpdate = true; e.repeat.copy(b.repeat);
+  const m = std('#ffffff', { map:b, emissive:'#ffffff', emissiveMap:e, emissiveIntensity:0 }); m.userData.k = 1; winMats.push(m);
+  const g = new THREE.Group(); g.add(mesh3(new THREE.BoxGeometry(w, h, d), m, 0, h / 2, 0)); return g;
+}
+function cactus(s) {
+  const g = new THREE.Group(), m = std('#4c9a4a');
+  g.add(mesh3(new THREE.CylinderGeometry(.2 * s, .22 * s, 1.6 * s, 10), m, 0, .8 * s, 0));
+  for (const x of [-1, 1]) {
+    g.add(mesh3(new THREE.CylinderGeometry(.12 * s, .12 * s, .5 * s, 8), m, x * .4 * s, .85 * s, 0).rotateZ(Math.PI / 2));
+    g.add(mesh3(new THREE.CylinderGeometry(.11 * s, .11 * s, .6 * s, 8), m, x * .62 * s, 1.15 * s, 0));
+  }
+  return g;
+}
+function palm(s) {
+  const g = new THREE.Group(), tm = std('#9a6a3a'), lm = std('#2e9a48', { side:THREE.DoubleSide });
+  for (let i = 0; i < 4; i++) { const sg = mesh3(new THREE.CylinderGeometry(.13 * s, .17 * s, .8 * s, 8), tm, i * .1 * s, (.4 + i * .75) * s, 0); sg.rotation.z = -.1; g.add(sg); }
+  const top = new THREE.Group(); top.position.set(.4 * s, 3.1 * s, 0);
+  for (let k = 0; k < 7; k++) {
+    const lf = new THREE.Group(); lf.rotation.y = k * Math.PI * 2 / 7;
+    const c = mesh3(new THREE.ConeGeometry(.2 * s, 1.6 * s, 6), lm, .7 * s, 0, 0); c.rotation.z = -Math.PI / 2 + .5; lf.add(c); top.add(lf);
+  }
+  g.add(top); return g;
+}
+
+function buildEnv(loc) {
+  envGroup.clear(); winMats.length = 0; animated.length = 0; homeGlass = null; envLoc = loc;
+  groundMat.color.set(GROUND[loc] || '#6bbf59');
+  const vert = H > W, SP = vert ? .45 : 1, SPm = Math.max(SP, .6), r = rng(loc.length * 977 + 13);
+  const put = (o, x, y, z) => { o.position.set(x, y, z); envGroup.add(o); return o; };
+  const scatter = (n, fn, xr, z0, z1) => { for (let i = 0; i < n; i++) fn((r() * 2 - 1) * xr * SP, z0 + (z1 - z0) * r()); };
+  const trees = (x, z) => put(r() < .5 ? pine(1 + r() * .9) : treeRound(1 + r() * .7), x, -.62, z);
+
+  switch (loc) {
+    case 'meadow':
+      for (let i = 0; i < 4; i++) { const h = mesh3(new THREE.SphereGeometry(1, 24, 16), std(['#5fae52', '#74c063', '#4f9a48', '#68b85a'][i])); h.scale.set(6 + r() * 4, 1.6 + r() * 1.2, 3); put(h, (-14 + i * 9.5) * SPm, -.8, -16 - r() * 3); }
+      scatter(6, (x, z) => put(treeRound(.9 + r() * .6), x, -.62, z), 11, -4, -10);
+      scatter(40, (x, z) => put(mesh3(new THREE.SphereGeometry(.09, 8, 6), std(['#ff5d8f', '#ffd23f', '#ffffff', '#b388ff'][Math.floor(r() * 4)])), x, -.55, z), 6, -2.5, 2.5);
+      break;
+    case 'forest':
+      scatter(26, (x, z) => put(r() < .7 ? pine(1 + r() * .9) : treeRound(1 + r() * .7, '#2f8a40'), x, -.62, z), 12, -3, -14);
+      scatter(8, (x, z) => put(mesh3(new THREE.IcosahedronGeometry(.45 + r() * .3, 0), std('#2c7a3a')), x, -.4, z), 7, -1.5, -4);
+      break;
+    case 'village': {
+      const cols = ['#f1d9a8', '#e8b68c', '#d9e4f0', '#f3c9c9'], roofs = ['#b34a3a', '#8a3b2e', '#a5532f'];
+      for (let i = 0; i < 4; i++) put(house(2.6 + r(), 1.8 + r() * .6, 2.2, cols[i % 4], roofs[i % 3]), ((i - 1.5) * 5.2 + (r() - .5)) * SPm, -.62, -8 - r() * 3);
+      for (let i = -12; i <= 12; i++) put(mesh3(new THREE.BoxGeometry(.08, .7, .08), std('#8a5a33')), i * .8 * SP, -.27, -4);
+      put(mesh3(new THREE.BoxGeometry(19.2 * SP, .07, .05), std('#8a5a33')), 0, -.1, -4);
+      put(mesh3(new THREE.BoxGeometry(19.2 * SP, .07, .05), std('#8a5a33')), 0, -.4, -4);
+      scatter(4, (x, z) => put(treeRound(1 + r() * .5), x, -.62, z), 10, -5, -7);
+      for (let i = 0; i < 2; i++) { const h = mesh3(new THREE.CylinderGeometry(.5, .5, .9, 14), std('#e2c25a')); h.rotation.z = Math.PI / 2; put(h, (i ? 2.4 : -2.6) * SPm, -.17, -3); }
+      break;
+    }
+    case 'city': {
+      const lim = 13 * Math.max(SP, .5); let x = -lim;
+      while (x < lim) { const w = 2 + r() * 2.2, h = 4 + r() * 6; put(building(w, h, 2.4), x + w / 2, -.62, -9 - r() * 2); x += w + .25; }
+      for (let i = -8; i <= 8; i++) put(mesh3(new THREE.BoxGeometry(.9, .02, .15), std('#ffffff')), i * 1.6 * SPm, -.6, -3.2);
+      for (const sx of [-1, 1]) {
+        const g = new THREE.Group(); g.add(mesh3(new THREE.CylinderGeometry(.06, .08, 3, 8), std('#444'), 0, 1.5, 0));
+        g.add(mesh3(new THREE.SphereGeometry(.22, 12, 10), glowMat('#ffe9a8', 1.5), 0, 3.1, 0)); put(g, sx * (vert ? 1.9 : 4.5), -.62, -2.6);
+      }
+      break;
+    }
+    case 'home': {
+      const winX = vert ? 1.2 : 4;
+      put(mesh3(new THREE.BoxGeometry(30, 9, .3), std('#e9cfa6')), 0, 3.88, -3.4);
+      put(mesh3(new THREE.BoxGeometry(30, .4, .35), std('#8a5a33')), 0, -.4, -3.35);
+      put(mesh3(new THREE.BoxGeometry(2.4, 2.8, .14), std('#6b4226')), winX, 3.0, -3.2);
+      const glass = new THREE.MeshBasicMaterial({ color:'#9fd4ff' }); homeGlass = glass;
+      put(mesh3(new THREE.PlaneGeometry(2.1, 2.5), glass), winX, 3.0, -3.1);
+      put(mesh3(new THREE.BoxGeometry(2.1, .06, .06), std('#6b4226')), winX, 3.0, -3.06);
+      put(mesh3(new THREE.BoxGeometry(.06, 2.5, .06), std('#6b4226')), winX, 3.0, -3.06);
+      const rug = mesh3(new THREE.CircleGeometry(2.3, 32), std('#b5524a')); rug.rotation.x = -Math.PI / 2; put(rug, 0, -.6, .2);
+      const bed = new THREE.Group();
+      bed.add(mesh3(new THREE.BoxGeometry(2.6, .5, 1.6), std('#8a5a33'), 0, .25, 0));
+      bed.add(mesh3(new THREE.BoxGeometry(2.4, .3, 1.5), std('#f3f1ff'), 0, .62, 0));
+      bed.add(mesh3(new THREE.BoxGeometry(.7, .2, .9), std('#a8c8ff'), -.8, .85, 0));
+      put(bed, vert ? -1.2 : -4.5, -.62, -2.3);
+      const table = new THREE.Group();
+      table.add(mesh3(new THREE.BoxGeometry(1.4, .12, .9), std('#7a4a2a'), 0, .8, 0));
+      for (const [a, b] of [[-.6, -.35], [.6, -.35], [-.6, .35], [.6, .35]]) table.add(mesh3(new THREE.BoxGeometry(.1, .8, .1), std('#7a4a2a'), a, .4, b));
+      table.add(mesh3(new THREE.SphereGeometry(.25, 12, 10), glowMat('#ffe9a8', 1.5), 0, 1.2, 0));
+      put(table, vert ? 2.3 : 7, -.62, -2.4);
+      put(mesh3(new THREE.PlaneGeometry(1.2, .9), std('#7aa8d8', { side:THREE.DoubleSide })), vert ? -1.4 : -2, 3.4, -3.2);
+      put(mesh3(new THREE.PlaneGeometry(.9, 1.2), std('#e89a7a', { side:THREE.DoubleSide })), vert ? -.1 : -.4, 3.2, -3.2);
+      const pl = new THREE.PointLight('#ffd9a0', 0, 14, 2); put(pl, 0, 3.2, 2.5);
+      animated.push(() => { pl.intensity = glowNow * 60; });
+      break;
+    }
+    case 'castle': {
+      const stone = std('#bdb8c8'), roofM = std('#c0392b');
+      put(mesh3(new THREE.BoxGeometry(4.5, 6, 3), stone), 0, 2.38, -12);
+      for (const sx of [-1, 1]) {
+        put(mesh3(new THREE.CylinderGeometry(1, 1.1, 8, 16), stone), sx * 3.6, 3.4, -12);
+        put(mesh3(new THREE.ConeGeometry(1.4, 2.4, 16), roofM), sx * 3.6, 8.6, -12);
+        put(mesh3(new THREE.CylinderGeometry(.04, .04, 1.4, 6), std('#444')), sx * 3.6, 10.3, -12);
+        put(mesh3(new THREE.PlaneGeometry(.9, .5), std('#ffd23f', { side:THREE.DoubleSide })), sx * 3.6 + .5, 10.7, -12);
+      }
+      put(mesh3(new THREE.BoxGeometry(1.4, 2.4, .2), std('#4a2f1a')), 0, .58, -10.45);
+      for (let i = -2; i <= 2; i++) put(mesh3(new THREE.BoxGeometry(.5, .6, .5), stone), i * .95, 5.7, -10.6);
+      const gm = glowMat(); for (const wx of [-1.2, 1.2]) put(mesh3(new THREE.BoxGeometry(.5, .9, .1), gm), wx, 3.2, -10.47);
+      scatter(6, (x, z) => put(treeRound(1 + r() * .5), x, -.62, z), 11, -4, -9);
+      break;
+    }
+    case 'mountain':
+      for (let i = 0; i < 6; i++) {
+        const h = 7 + r() * 5, rad = 5 + r() * 3, g = new THREE.Group();
+        g.add(mesh3(new THREE.ConeGeometry(rad, h, 7), std('#7c8b9c'), 0, h / 2, 0));
+        g.add(mesh3(new THREE.ConeGeometry(rad * .36, h * .3, 7), std('#f4f8ff'), 0, h * .85, 0));
+        put(g, (-15 + i * 6 + (r() - .5) * 3) * Math.max(SP, .7), -.62, -17 - r() * 6);
+      }
+      scatter(10, (x, z) => put(pine(1 + r() * .8), x, -.62, z), 10, -4, -11);
+      break;
+    case 'river': {
+      const water = mesh3(new THREE.PlaneGeometry(70, 7), std('#3fa7e0', { roughness:.2, flatShading:false, emissive:'#1b6fa0', emissiveIntensity:.15 }));
+      water.rotation.x = -Math.PI / 2; put(water, 0, -.58, -5.5);
+      animated.push(tm => { water.material.emissiveIntensity = .15 + Math.sin(tm * 1.5) * .06; });
+      for (let i = 0; i < 10; i++) { const lp = mesh3(new THREE.CircleGeometry(.35, 12), std('#4cae5a', { side:THREE.DoubleSide })); lp.rotation.x = -Math.PI / 2; put(lp, (r() * 2 - 1) * 7 * SP, -.56, -3.2 - r() * 4.5); }
+      scatter(14, trees, 11, -10, -15);
+      scatter(6, (x, z) => put(mesh3(new THREE.IcosahedronGeometry(.3 + r() * .3, 0), std('#8d949c')), x, -.45, z), 6, -2.2, -2.2);
+      break;
+    }
+    case 'school': {
+      const sx = Math.max(SP, .5);
+      put(mesh3(new THREE.BoxGeometry(10, 3.6, 3.2), std('#d6694c')), 0, 1.18, -9);
+      put(mesh3(new THREE.BoxGeometry(10.4, .4, 3.6), std('#8c3a2a')), 0, 3.18, -9);
+      put(mesh3(new THREE.BoxGeometry(1.2, 2, .12), std('#5a3a22')), 0, .38, -7.35);
+      const gm = glowMat(); for (let i = -3; i <= 3; i++) { if (i === 0) continue; put(mesh3(new THREE.BoxGeometry(.9, .9, .1), gm), i * 1.3, 1.9, -7.38); }
+      put(mesh3(new THREE.CircleGeometry(.4, 24), std('#ffffff')), 0, 2.7, -7.38);
+      put(mesh3(new THREE.CylinderGeometry(.05, .05, 3.2, 6), std('#888')), 5.8 * sx, .98, -6.5);
+      put(mesh3(new THREE.PlaneGeometry(1, .6), std('#ff9f1c', { side:THREE.DoubleSide })), 6.3 * sx, 2.2, -6.5);
+      scatter(4, (x, z) => put(treeRound(1 + r() * .5), x, -.62, z), 9, -4, -6);
+      break;
+    }
+    case 'desert':
+      for (let i = 0; i < 5; i++) { const d = mesh3(new THREE.SphereGeometry(1, 24, 14), std(['#e8c985', '#dcb872', '#efd596'][i % 3])); d.scale.set(7 + r() * 4, 1.5 + r() * 1.5, 4); put(d, (-14 + i * 7) * SPm, -.9, -12 - r() * 6); }
+      scatter(5, (x, z) => put(cactus(.8 + r() * .6), x, -.62, z), 9, -3, -9);
+      scatter(6, (x, z) => put(mesh3(new THREE.IcosahedronGeometry(.3 + r() * .3, 0), std('#a08a60')), x, -.45, z), 8, -2, -8);
+      break;
+    case 'snow': {
+      scatter(14, (x, z) => put(pine(1 + r() * .9, true), x, -.62, z), 11, -3, -13);
+      const sm = new THREE.Group();
+      [[.6, .0], [.45, .85], [.32, 1.45]].forEach(([rd, y]) => sm.add(mesh3(new THREE.SphereGeometry(rd, 16, 12), std('#ffffff'), 0, y, 0)));
+      const carrot = mesh3(new THREE.ConeGeometry(.06, .3, 8), std('#ff8a1f'), 0, 1.45, .32); carrot.rotation.x = Math.PI / 2; sm.add(carrot);
+      for (const x of [-.1, .1]) sm.add(mesh3(new THREE.SphereGeometry(.04, 8, 6), std('#111'), x, 1.55, .28));
+      put(sm, vert ? -1.9 : -4.5, -.02, -5);
+      const N = 320, pos = new Float32Array(N * 3), lim = 10 * Math.max(SP, .5);
+      for (let i = 0; i < N; i++) { pos[i * 3] = (r() * 2 - 1) * lim; pos[i * 3 + 1] = r() * 8; pos[i * 3 + 2] = -9 + r() * 12; }
+      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      envGroup.add(new THREE.Points(geo, new THREE.PointsMaterial({ color:'#ffffff', size:.09 })));
+      animated.push((tm, dt) => {
+        for (let i = 0; i < N; i++) { pos[i * 3 + 1] -= dt * (.8 + (i % 5) * .15); pos[i * 3] += Math.sin(tm + i) * dt * .2; if (pos[i * 3 + 1] < -.6) pos[i * 3 + 1] = 8; }
+        geo.attributes.position.needsUpdate = true;
+      });
+      break;
+    }
+    case 'ocean': {
+      const sea = mesh3(new THREE.PlaneGeometry(90, 40), std('#2f9fe0', { roughness:.2, flatShading:false, emissive:'#126aa6', emissiveIntensity:.12 }));
+      sea.rotation.x = -Math.PI / 2; put(sea, 0, -.58, -22.5);
+      const foam = [];
+      for (let i = 0; i < 4; i++) { const f = mesh3(new THREE.BoxGeometry(60, .02, .18), std('#ffffff', { emissive:'#ffffff', emissiveIntensity:.15 })); put(f, 0, -.56, -3.2 - i * 1.6); foam.push(f); }
+      animated.push(tm => foam.forEach((f, i) => { f.position.x = Math.sin(tm * .8 + i) * 1.2; f.position.z = -3.2 - i * 1.6 + Math.sin(tm * 1.1 + i) * .15; }));
+      const boat = new THREE.Group();
+      boat.add(mesh3(new THREE.BoxGeometry(2, .5, .8), std('#8a5a33'), 0, .25, 0));
+      boat.add(mesh3(new THREE.CylinderGeometry(.04, .04, 2.2, 6), std('#777'), 0, 1.4, 0));
+      boat.add(mesh3(new THREE.ConeGeometry(.9, 1.8, 3), std('#ffffff', { side:THREE.DoubleSide }), .45, 1.5, 0));
+      put(boat, vert ? 1.2 : 5, -.58, -12);
+      animated.push(tm => { boat.position.y = -.58 + Math.sin(tm * 1.4) * .1; boat.rotation.z = Math.sin(tm * 1.2) * .05; });
+      put(palm(1.2), vert ? -2.2 : -6, -.62, -1.8);
+      put(palm(1), vert ? 2.4 : 7, -.62, -1.8);
+      break;
+    }
+    case 'space': {
+      const planet = (rad, col, x, y, z, ring) => {
+        const g = new THREE.Group(); g.add(mesh3(new THREE.SphereGeometry(rad, 32, 24), std(col, { flatShading:false })));
+        if (ring) { const t = mesh3(new THREE.TorusGeometry(rad * 1.6, rad * .08, 6, 48), std('#e8d8a8')); t.rotation.x = Math.PI / 2.4; g.add(t); }
+        return put(g, x, y, z);
+      };
+      planet(3, '#d9774a', -6 * SPm, 5, -20, true); planet(1.4, '#4aa3d9', vert ? 2.2 : 8, 3.5, -15); planet(.7, '#c9c9d6', vert ? -2 : -9, 2, -12);
+      for (let i = 0; i < 8; i++) {
+        const a = mesh3(new THREE.IcosahedronGeometry(.25 + r() * .3, 0), std('#8a8a99')), sp = .2 + r() * .4, ph = r() * 6;
+        put(a, (r() * 2 - 1) * 8 * SP, 1 + r() * 5, -6 - r() * 8);
+        animated.push((tm, dt) => { a.rotation.x += dt * sp; a.rotation.y += dt * .3; a.position.y += Math.sin(tm * sp + ph) * .003; });
+      }
+      const rk = new THREE.Group();
+      rk.add(mesh3(new THREE.CylinderGeometry(.5, .6, 2.6, 16), std('#f2f2f7'), 0, 1.3, 0));
+      rk.add(mesh3(new THREE.ConeGeometry(.5, 1, 16), std('#e74c3c'), 0, 3.1, 0));
+      for (const a of [0, 2.09, 4.19]) rk.add(mesh3(new THREE.BoxGeometry(.1, .8, .6), std('#e74c3c'), Math.sin(a) * .65, .4, Math.cos(a) * .65));
+      rk.add(mesh3(new THREE.SphereGeometry(.2, 12, 10), std('#79d7ff', { emissive:'#79d7ff', emissiveIntensity:.3 }), 0, 1.9, .5));
+      put(rk, vert ? 1.9 : 5.5, -.62, -6);
+      scatter(8, (x, z) => { const c = mesh3(new THREE.CircleGeometry(.5 + r() * .6, 16), std('#3b3b4a')); c.rotation.x = -Math.PI / 2; put(c, x, -.6, z); }, 8, -5, 2);
+      break;
+    }
+    default: break;
+  }
+}
+
+/* ---------- sky / light state ---------- */
+const TVT = {};
+for (const k in TV) {
+  const v = TV[k];
+  TVT[k] = Object.assign({}, v, { top:new THREE.Color(v.top), bot:new THREE.Color(v.bot), hemi:new THREE.Color(v.hemi), gnd:new THREE.Color(v.gnd), sun:new THREE.Color(v.sun) });
+}
+const tv = { top:new THREE.Color('#3f9cff'), bot:new THREE.Color('#cfeaff'), hemi:new THREE.Color('#ffffff'), gnd:new THREE.Color('#6a7a8a'), sun:new THREE.Color('#ffffff'), night:0, sunX:.62, sunY:.16, sunA:1, moonA:0, hi:1.15, si:1.7 };
+let tvInit = false, glowNow = 0, spaceA = 0;
+const NUMK = ['night', 'sunX', 'sunY', 'sunA', 'moonA', 'hi', 'si'], COLK = ['top', 'bot', 'hemi', 'gnd', 'sun'];
+function snapTV(t) { COLK.forEach(k => tv[k].copy(t[k])); NUMK.forEach(k => { tv[k] = t[k]; }); }
+function stepTV(t, dt) { const f = 1 - Math.exp(-dt * 2.2); COLK.forEach(k => tv[k].lerp(t[k], f)); NUMK.forEach(k => { tv[k] += (t[k] - tv[k]) * f; }); }
+
+const STARS = (() => { const r = rng(4242), a = []; for (let i = 0; i < 150; i++) a.push({ x:r(), y:r() * .75, r:.6 + r() * 1.6, ph:r() * 6 }); return a; })();
+const CLOUDS = [{ y:.14, s:.012, b:.1, z:1 }, { y:.26, s:.018, b:.5, z:.8 }, { y:.09, s:.009, b:.8, z:1.2 }, { y:.33, s:.014, b:.3, z:.7 }];
+const hex = c => '#' + c.getHexString();
+
+function drawSky(time) {
+  const SPACE_TOP = '#02030a', SPACE_BOT = '#15163a';
+  const sp = spaceA;
+  const gr = ctx2d.createLinearGradient(0, 0, 0, H);
+  if (sp > .99) { gr.addColorStop(0, SPACE_TOP); gr.addColorStop(1, SPACE_BOT); }
+  else {
+    const a = tv.top.clone().lerp(new THREE.Color(SPACE_TOP), sp), b = tv.bot.clone().lerp(new THREE.Color(SPACE_BOT), sp);
+    gr.addColorStop(0, hex(a)); gr.addColorStop(1, hex(b));
+  }
+  ctx2d.fillStyle = gr; ctx2d.fillRect(0, 0, W, H);
+  const sa = Math.max(tv.night * .95, sp);
+  if (sa > .02) {
+    ctx2d.fillStyle = '#fff';
+    for (const s of STARS) { ctx2d.globalAlpha = sa * (.55 + .45 * Math.sin(time * 2 + s.ph)); ctx2d.beginPath(); ctx2d.arc(s.x * W, s.y * H, s.r * (W / 720), 0, 7); ctx2d.fill(); }
+    ctx2d.globalAlpha = 1;
+  }
+  const ca = (1 - clamp(tv.night * .85, 0, 1)) * (1 - sp) * .9;
+  if (ca > .02) {
+    ctx2d.fillStyle = '#fff';
+    for (const c of CLOUDS) {
+      const x = (((c.b + time * c.s) % 1.4) - .2) * W, y = c.y * H, u = W * .09 * c.z;
+      ctx2d.globalAlpha = ca * .85;
+      for (const [dx, dy, k] of [[0, 0, 1], [.8, .1, .8], [-.8, .12, .75], [.3, -.35, .8]]) { ctx2d.beginPath(); ctx2d.ellipse(x + dx * u, y + dy * u, u * k, u * k * .55, 0, 0, 7); ctx2d.fill(); }
+    }
+    ctx2d.globalAlpha = 1;
+  }
+  if (tv.sunA * (1 - sp) > .02) {
+    const x = tv.sunX * W, y = tv.sunY * H, rad = W * .085;
+    const g = ctx2d.createRadialGradient(x, y, rad * .2, x, y, rad * 3);
+    g.addColorStop(0, hex(tv.sun)); g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx2d.globalAlpha = tv.sunA * (1 - sp) * .55; ctx2d.fillStyle = g; ctx2d.beginPath(); ctx2d.arc(x, y, rad * 3, 0, 7); ctx2d.fill();
+    ctx2d.globalAlpha = tv.sunA * (1 - sp); ctx2d.fillStyle = hex(tv.sun); ctx2d.beginPath(); ctx2d.arc(x, y, rad, 0, 7); ctx2d.fill();
+    ctx2d.globalAlpha = 1;
+  }
+  if (tv.moonA * (1 - sp) > .02) {
+    const x = W * .72, y = H * .17, rad = W * .065;
+    const g = ctx2d.createRadialGradient(x, y, rad * .3, x, y, rad * 3);
+    g.addColorStop(0, 'rgba(255,248,220,.6)'); g.addColorStop(1, 'rgba(255,248,220,0)');
+    ctx2d.globalAlpha = tv.moonA * (1 - sp); ctx2d.fillStyle = g; ctx2d.beginPath(); ctx2d.arc(x, y, rad * 3, 0, 7); ctx2d.fill();
+    ctx2d.fillStyle = '#fff8dc'; ctx2d.beginPath(); ctx2d.arc(x, y, rad, 0, 7); ctx2d.fill();
+    ctx2d.fillStyle = 'rgba(200,190,160,.5)'; ctx2d.beginPath(); ctx2d.arc(x - rad * .3, y - rad * .2, rad * .18, 0, 7); ctx2d.arc(x + rad * .25, y + rad * .3, rad * .12, 0, 7); ctx2d.fill();
+    ctx2d.globalAlpha = 1;
+  }
+}
+
+/* =====================================================================
+   CHARACTER / SCENE LOGIC
+   ===================================================================== */
+function activeChars() { return chars.filter(c => c.on); }
+
+function recompute() {
+  let act = activeChars();
+  if (!act.length && chars.length) { chars[0].on = true; act = [chars[0]]; }
+  const list = act.map(c => ({ id:c.id, al:new Set(c.aliases) }));
+  cueMeta = cues.map(c => mentionsOf(c.t, list));
+  scenes.sort((a, b) => a.start - b.start);
+  let prev = [];
+  sceneCast = scenes.map((s, i) => {
+    const end = i + 1 < scenes.length ? scenes[i + 1].start : Infinity, set = [];
+    cues.forEach((c, ci) => { if (c.s >= s.start - .01 && c.s < end) cueMeta[ci].forEach(id => { if (!set.includes(id)) set.push(id); }); });
+    let res = set.length ? set : (prev.length ? prev : act.slice(0, 3).map(c => c.id));
+    res = res.slice(0, 4); prev = res; return res;
+  });
+}
+const nameOf = id => (chars.find(c => c.id === id) || {}).name || '?';
+const sceneIndexAt = t => { let k = 0; for (let i = 0; i < scenes.length; i++) if (scenes[i].start <= t) k = i; return k; };
+const cueIndexAt = t => { for (let i = 0; i < cues.length; i++) if (t >= cues[i].s && t <= cues[i].e + .15) return i; return -1; };
+
+function refresh() { recompute(); renderScenes(); }
+
+function renderChars() {
+  const box = $('chars'); box.innerHTML = '';
+  if (!chars.length) { box.innerHTML = '<div class="small">Abhi koi character nahi.</div>'; return; }
+  chars.forEach(c => {
+    const row = document.createElement('div'); row.className = 'chr';
+    row.innerHTML = `
+      <div class="ln"><input type="checkbox" class="ck" ${c.on ? 'checked' : ''}>
+        <input type="text" class="nm" value="${esc(c.name)}">
+        <span class="small">${c.count ? c.count + ' baar' : ''}</span><button class="rm" title="hata do">✕</button></div>
+      <div class="ln"><select class="kd">${Object.entries(KINDS).map(([k, v]) => `<option value="${k}" ${k === c.kind ? 'selected' : ''}>${v[0]}</option>`).join('')}</select>
+        <input type="color" class="c1" value="${c.skin}" title="Skin / fur"><input type="color" class="c2" value="${c.shirt}" title="Kapde">
+        <input type="color" class="c3" value="${c.hair}" title="Baal / extra"></div>`;
+    row.querySelector('.ck').onchange = e => { c.on = e.target.checked; refresh(); };
+    row.querySelector('.nm').onchange = e => {
+      c.name = e.target.value || c.name;
+      tokens(c.name).forEach(t => { if (!c.aliases.includes(t.n)) c.aliases.push(t.n); });
+      refresh();
+    };
+    row.querySelector('.kd').onchange = e => { c.kind = e.target.value; c.skin = KINDS[c.kind][1]; c.hair = KINDS[c.kind][2]; buildObj(c); renderChars(); };
+    row.querySelector('.c1').onchange = e => { c.skin = e.target.value; buildObj(c); };
+    row.querySelector('.c2').onchange = e => { c.shirt = e.target.value; buildObj(c); };
+    row.querySelector('.c3').onchange = e => { c.hair = e.target.value; buildObj(c); };
+    row.querySelector('.rm').onclick = () => {
+      if (chars.length < 2) return;
+      scene3.remove(c.obj.group); chars.splice(chars.indexOf(c), 1); renderChars(); refresh();
+    };
+    box.appendChild(row);
+  });
+}
+$('addChar').onclick = () => {
+  const c = newChar('Naya kirdaar', 'boy', 0, [], chars.length); chars.push(c); buildObj(c); renderChars(); refresh();
+};
+
+function renderScenes() {
+  const box = $('scenes'); box.innerHTML = '';
+  scenes.forEach((s, i) => {
+    const row = document.createElement('div'); row.className = 'scene';
+    row.innerHTML = `
+      <input type="number" class="st" min="0" step="0.5" value="${(+s.start).toFixed(1)}">
+      <select class="tm">${Object.entries(TIMES_UI).map(([k, v]) => `<option value="${k}" ${k === s.time ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <select class="lc">${Object.entries(LOCS_UI).map(([k, v]) => `<option value="${k}" ${k === s.loc ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <select class="cm">${Object.entries(CAMS).map(([k, v]) => `<option value="${k}" ${k === s.cam ? 'selected' : ''}>${v.name}</option>`).join('')}</select>
+      <button class="dl" title="delete">✕</button>
+      <div class="cast small">👥 ${(sceneCast[i] || []).map(nameOf).join(', ') || '-'}</div>`;
+    row.querySelector('.st').onchange = e => { s.start = Math.max(0, +e.target.value || 0); refresh(); };
+    row.querySelector('.tm').onchange = e => { s.time = e.target.value; };
+    row.querySelector('.lc').onchange = e => { s.loc = e.target.value; };
+    row.querySelector('.cm').onchange = e => { s.cam = e.target.value; };
+    row.querySelector('.dl').onclick = () => { if (scenes.length > 1) { scenes.splice(i, 1); refresh(); } };
+    box.appendChild(row);
+  });
+}
+$('addScene').onclick = () => {
+  const last = scenes[scenes.length - 1];
+  scenes.push({ start:Math.round((last.start + 5) * 2) / 2, time:last.time, loc:last.loc, cam:'auto' });
+  refresh();
+};
+
+/* ---------- cues + analysis ---------- */
+function parseCues() {
+  cues = $('cuesBox').value.split('\n').map(l => {
+    const m = l.match(/^\s*([\d.]+)\s*-\s*([\d.]+)\s*\|\s*(.+)$/); return m ? { s:+m[1], e:+m[2], t:m[3].trim() } : null;
+  }).filter(Boolean);
+}
+$('cuesBox').oninput = parseCues;
+
+/* ---------- Hinglish (Devanagari -> Roman) ---------- */
+const DV = { 'अ':'a','आ':'aa','इ':'i','ई':'i','उ':'u','ऊ':'u','ऋ':'ri','ए':'e','ऐ':'ai','ओ':'o','औ':'au','ऑ':'o' };
+const DM = { 'ा':'a','ि':'i','ी':'i','ु':'u','ू':'u','ृ':'ri','े':'e','ै':'ai','ो':'o','ौ':'au','ॉ':'o','ॅ':'e' };
+const DC = { 'क':'k','ख':'kh','ग':'g','घ':'gh','ङ':'n','च':'ch','छ':'chh','ज':'j','झ':'jh','ञ':'n','ट':'t','ठ':'th','ड':'d','ढ':'dh','ण':'n','त':'t','थ':'th','द':'d','ध':'dh','न':'n','प':'p','फ':'f','ब':'b','भ':'bh','म':'m','य':'y','र':'r','ल':'l','व':'v','श':'sh','ष':'sh','स':'s','ह':'h' };
+const NUKTA = { k:'q', kh:'kh', g:'g', j:'z', d:'d', dh:'dh', f:'f' };
+function devWord(w) {
+  const sy = [];
+  for (const ch of w) {
+    const last = sy[sy.length - 1];
+    if (DC[ch]) sy.push({ c:DC[ch], v:'a', inh:true, n:'' });
+    else if (ch === '़') { if (last && last.c) last.c = NUKTA[last.c] || last.c; }
+    else if (DM[ch]) { if (last) { last.v = DM[ch]; last.inh = false; } }
+    else if (ch === '्') { if (last) { last.v = ''; last.inh = false; } }
+    else if (DV[ch]) sy.push({ c:'', v:DV[ch], inh:false, n:'' });
+    else if (ch === 'ं' || ch === 'ँ') { if (last) { if (last.v === 'e' && w.endsWith(ch)) last.v = 'ei'; last.n = 'n'; } }
+    else if (ch === 'ः') { if (last) last.n = 'h'; }
+    else if (ch === '।' || ch === '॥') sy.push({ c:'.', v:'', inh:false, n:'' });
+    else if (ch >= '०' && ch <= '९') sy.push({ c:String(ch.charCodeAt(0) - 2406), v:'', inh:false, n:'' });
+    else sy.push({ c:ch, v:'', inh:false, n:'' });
+  }
+  // schwa deletion, right to left: word-final, and medial between two vowel-bearing syllables
+  for (let i = sy.length - 1; i >= 0; i--) {
+    if (!sy[i].inh || sy.length === 1) continue;
+    if (i === sy.length - 1) sy[i].v = '';
+    else if (i > 0 && sy[i - 1].v !== '' && sy[i + 1].v !== '' && sy[i - 1].c !== '') sy[i].v = '';
+  }
+  return sy.map(s => s.c + s.v + s.n).join('');
+}
+function toHinglish(text) { return text.normalize('NFD').replace(/[ऀ-ॿ]+/g, devWord).normalize('NFC'); }
+
+/* ---------- English cues ---------- */
+let cuesEn = [], lastSegs = [];
+function parseEn() {
+  cuesEn = $('enBox').value.split('\n').map(l => {
+    const m = l.match(/^\s*([\d.]+)\s*-\s*([\d.]+)\s*\|\s*(.+)$/); return m ? { s:+m[1], e:+m[2], t:m[3].trim() } : null;
+  }).filter(Boolean);
+}
+$('enBox').oninput = parseEn;
+$('capLang').onchange = () => {
+  if ($('capLang').value === 'en' && !cuesEn.length) status('English captions abhi nahi bane. "English captions banao" dabao.');
+};
+$('enBtn').onclick = async () => {
+  $('enBtn').disabled = true;
+  try {
+    parseCues();
+    const segs = lastSegs.length ? lastSegs : (cues.length ? cues.map(c => ({ s:c.s, e:c.e })) : [{ s:0, e:buffer.duration }]);
+    const en = $('enText').value.trim();
+    let list;
+    if (en) {
+      list = alignToSpeech(en, segs).map(c => `${c.s.toFixed(2)}-${c.e.toFixed(2)} | ${c.t}`);
+    } else {
+      status('Whisper load ho raha hai (English translate)...');
+      const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+      env.allowLocalModels = false;
+      const name = $('model').value;
+      asrCache[name] = asrCache[name] || await pipeline('automatic-speech-recognition', name, {
+        progress_callback: p => { if (p.status === 'progress') status(`Model download: ${Math.round(p.progress)}%`); },
+      });
+      status('Audio ko English mein translate kar raha hoon...');
+      const res = await asrCache[name](await toMono16k(buffer), { return_timestamps:true, chunk_length_s:30, stride_length_s:5, task:'translate', language:$('lang').value || 'hindi' });
+      list = (res.chunks || []).map(c => { const s = c.timestamp[0] ?? 0, e = c.timestamp[1] ?? s + 2; return `${s.toFixed(2)}-${e.toFixed(2)} | ${c.text.trim()}`; });
+    }
+    $('enBox').value = list.join('\n'); parseEn();
+    $('capLang').value = 'en';
+    status(`English captions ready (${list.length} lines).`);
+  } catch (err) { status('English error: ' + err.message); console.error(err); }
+  $('enBtn').disabled = false;
+};
+
+function splitStory(txt) {
+  const sentences = (txt.match(/[^।.!?\n]+[।.!?]*/g) || []).map(s => s.trim()).filter(s => s.length > 1);
+  const parts = [];
+  for (const sn of sentences) {
+    let cur = '';
+    for (const w of sn.split(/\s+/)) { if (cur && (cur + ' ' + w).length > 70) { parts.push(cur); cur = w; } else cur = cur ? cur + ' ' + w : w; }
+    if (cur) parts.push(cur);
+  }
+  return parts;
+}
+// Put the user's own text on the real speech timing: only the spoken stretches count, pauses are skipped.
+function alignToSpeech(txt, segs) {
+  const parts = splitStory(txt);
+  if (!parts.length || !segs.length) return null;
+  const dur = segs.map(s => Math.max(.05, s.e - s.s)), D = dur.reduce((a, b) => a + b, 0);
+  const toTime = u => {
+    let r = u * D;
+    for (let i = 0; i < segs.length; i++) { if (r <= dur[i] || i === segs.length - 1) return segs[i].s + Math.min(r, dur[i]); r -= dur[i]; }
+    return segs[segs.length - 1].e;
+  };
+  const total = parts.reduce((a, p) => a + p.length + 4, 0); let acc = 0;
+  return parts.map(p => { const w = (p.length + 4) / total, s = toTime(acc), e = toTime(acc + w); acc += w; return { s, e, t:p }; });
+}
+
+function textToCues() {
+  const txt = $('storyText').value.trim();
+  if (!txt || !buffer) { status('Story text likho aur audio upload karo.'); return; }
+  const sentences = (txt.match(/[^।.!?\n]+[।.!?]*/g) || []).map(s => s.trim()).filter(s => s.length > 1);
+  const parts = [];
+  for (const sn of sentences) {
+    let cur = '';
+    for (const w of sn.split(/\s+/)) { if (cur && (cur + ' ' + w).length > 70) { parts.push(cur); cur = w; } else cur = cur ? cur + ' ' + w : w; }
+    if (cur) parts.push(cur);
+  }
+  const total = parts.reduce((a, p) => a + p.length + 6, 0), dur = buffer.duration; let t = 0;
+  $('cuesBox').value = parts.map(p => { const d = (p.length + 6) / total * dur; const line = `${t.toFixed(2)}-${(t + d).toFixed(2)} | ${p}`; t += d; return line; }).join('\n');
+  parseCues();
+  status('Timing ban gayi (andaza hai, cues box mein edit kar sakte ho). Ab "Story samjho" dabao.');
+}
+$('timeBtn').onclick = textToCues;
+
+function doAnalyze() {
+  parseCues();
+  if (!cues.length) { status('Pehle story text + timing chahiye (step 2): Whisper se ya apne text se.'); return; }
+  const found = findCharacters(cues);
+  chars.forEach(c => { if (c.obj) scene3.remove(c.obj.group); });
+  chars = [];
+  found.slice(0, 8).forEach((f, i) => { const c = newChar(f.label, f.kind, f.count, f.aliases, i); c.on = i < 4 && (f.count >= 2 || i < 2); chars.push(c); });
+  if (!chars.length) chars.push(newChar('Narrator', 'man', 0, [], 0));
+  chars.forEach(buildObj);
+  const groups = segmentTimeline(cues);
+  scenes = groups.length ? groups.map(g => ({ start:g.start, time:g.time, loc:g.loc, cam:'auto' })) : [{ start:0, time:'day', loc:'meadow', cam:'auto' }];
+  focusId = null;
+  renderChars(); refresh();
+  status(`Story samajh li: ${found.length} character mile, ${scenes.length} scene bane. Neeche se characters aur scenes badal sakte ho.`);
+}
+$('analyzeBtn').onclick = doAnalyze;
+
+/* ---------- audio ---------- */
+let actx = null, buffer = null, musicBuffer = null;
+let analyser = null, srcNode = null, musicSrc = null, musicGain = null, destNode = null;
+let playing = false, startedAt = 0, recording = false, recorder = null, chunks = [];
+const timeData = new Uint8Array(1024), freqData = new Uint8Array(512);
+let mouthOpen = 0, mouthWide = .5;
+
+async function decodeFile(file) {
+  actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+  return await actx.decodeAudioData(await file.arrayBuffer());
+}
+$('audioFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  status('Audio load ho raha hai...');
+  try {
+    buffer = await decodeFile(f);
+    ['playBtn', 'recBtn', 'subBtn', 'timeBtn', 'enBtn'].forEach(i => { $(i).disabled = false; });
+    status(`Audio ready: ${buffer.duration.toFixed(1)} second. Ab step 2 karo.`);
+  } catch (err) { status('Audio decode nahi hua: ' + err.message); }
+};
+$('musicFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { musicBuffer = await decodeFile(f); status('Music ready.'); } catch (err) { status('Music decode nahi hua.'); }
+};
+$('musicVol').oninput = () => { if (musicGain) musicGain.gain.value = +$('musicVol').value; };
+
+function startPlayback() {
+  stopPlayback(false);
+  actx.resume();
+  if (!analyser) { analyser = actx.createAnalyser(); analyser.fftSize = 1024; analyser.smoothingTimeConstant = .5; analyser.connect(actx.destination); }
+  destNode = actx.createMediaStreamDestination();
+  analyser.connect(destNode);
+  srcNode = actx.createBufferSource(); srcNode.buffer = buffer; srcNode.connect(analyser);
+  if (musicBuffer) {
+    musicSrc = actx.createBufferSource(); musicSrc.buffer = musicBuffer; musicSrc.loop = true;
+    musicGain = actx.createGain(); musicGain.gain.value = +$('musicVol').value;
+    musicSrc.connect(musicGain); musicGain.connect(actx.destination); musicGain.connect(destNode);
+    musicSrc.start();
+  }
+  startedAt = actx.currentTime + .05;
+  srcNode.start(startedAt);
+  focusId = null;
+  playing = true;
+  srcNode.onended = () => { if (playing) finishPlayback(); };
+  $('stopBtn').disabled = false;
+}
+function stopPlayback(update = true) {
+  playing = false;
+  try { srcNode && srcNode.stop(); } catch (e) {}
+  try { musicSrc && musicSrc.stop(); } catch (e) {}
+  try { destNode && analyser.disconnect(destNode); } catch (e) {}
+  srcNode = musicSrc = null;
+  if (update) { $('stopBtn').disabled = true; if (recording) cancelRecording(); status('Stop kiya.'); }
+}
+function finishPlayback() {
+  playing = false;
+  $('stopBtn').disabled = true;
+  if (recording) { setTimeout(() => recorder && recorder.state !== 'inactive' && recorder.stop(), 600); }
+  else status('Preview khatam.');
+  try { musicSrc && musicSrc.stop(); } catch (e) {}
+}
+$('playBtn').onclick = () => { startPlayback(); status('Chal raha hai...'); };
+$('stopBtn').onclick = () => stopPlayback(true);
+
+/* ---------- recording / export ---------- */
+function pickMime() {
+  const opts = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  return opts.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
+}
+$('recBtn').onclick = () => {
+  if (!window.MediaRecorder) { status('Is browser mein recording support nahi hai. Chrome use karo.'); return; }
+  startPlayback();
+  const stream = out.captureStream(30);
+  destNode.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+  const mime = pickMime();
+  chunks = [];
+  recorder = new MediaRecorder(stream, { mimeType: mime || undefined, videoBitsPerSecond: 6000000 });
+  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    recording = false; $('recBtn').disabled = false; $('prog').style.display = 'none';
+    const type = recorder.mimeType || 'video/webm';
+    const blob = new Blob(chunks, { type });
+    const ext = type.includes('mp4') ? 'mp4' : 'webm';
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `toon-story.${ext}`; a.click();
+    status(`Video ready (${ext}). Download shuru ho gaya.`);
+  };
+  recording = true; $('recBtn').disabled = true;
+  $('prog').style.display = 'block';
+  recorder.start(500);
+  status('Recording... audio khatam hone tak screen/tab khula rakho.');
+};
+function cancelRecording() { recording = false; try { recorder.onstop = null; recorder.stop(); } catch (e) {} $('recBtn').disabled = false; $('prog').style.display = 'none'; }
+
+/* ---------- aspect ---------- */
+function applyAspect() {
+  const v = $('aspect').value === 'v';
+  W = v ? 720 : 1280; H = v ? 1280 : 720;
+  out.width = W; out.height = H;
+  renderer.setSize(W, H, false);
+  camera.aspect = W / H; camera.updateProjectionMatrix();
+  if (envLoc) buildEnv(envLoc);
+}
+$('aspect').onchange = applyAspect;
+applyAspect();
+
+/* ---------- subtitles via Whisper ---------- */
+async function toMono16k(buf) {
+  const len = Math.ceil(buf.duration * 16000);
+  const off = new OfflineAudioContext(1, len, 16000);
+  const s = off.createBufferSource(); s.buffer = buf; s.connect(off.destination); s.start();
+  return (await off.startRendering()).getChannelData(0);
+}
+const asrCache = {};
+$('subBtn').onclick = async () => {
+  $('subBtn').disabled = true;
+  try {
+    status('Whisper load ho raha hai (pehli baar thoda time lagega)...');
+    const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+    env.allowLocalModels = false;
+    const name = $('model').value;
+    asrCache[name] = asrCache[name] || await pipeline('automatic-speech-recognition', name, {
+      progress_callback: p => { if (p.status === 'progress') status(`Model download: ${Math.round(p.progress)}%`); },
+    });
+    status('Audio se text nikal raha hoon...');
+    const audio = await toMono16k(buffer);
+    const opts = { return_timestamps: true, chunk_length_s: 30, stride_length_s: 5, task: 'transcribe' };
+    if ($('lang').value) opts.language = $('lang').value;
+    const res = await asrCache[name](audio, opts);
+    const segs = (res.chunks || []).map(c => { const s = c.timestamp[0] ?? 0; return { s, e:c.timestamp[1] ?? s + 2 }; });
+    lastSegs = segs;
+    const story = $('storyText').value.trim();
+    const aligned = story ? alignToSpeech(story, segs) : null;
+    const list = aligned
+      ? aligned.map(c => `${c.s.toFixed(2)}-${c.e.toFixed(2)} | ${c.t}`)
+      : (res.chunks || []).map(c => { const [s, e] = c.timestamp; return `${(s ?? 0).toFixed(2)}-${(e ?? (s ?? 0) + 2).toFixed(2)} | ${c.text.trim()}`; });
+    $('cuesBox').value = list.join('\n'); parseCues();
+    status(aligned ? `Aapka text audio ki timing par laga diya (${list.length} lines). Ab "Story samjho" dabao.`
+                   : `Text ready: ${list.length} lines. Ab "Story samjho" dabao.`);
+  } catch (err) { status('Whisper error: ' + err.message); console.error(err); }
+  $('subBtn').disabled = false;
+};
+
+/* =====================================================================
+   RENDER LOOP
+   ===================================================================== */
+const camPos = new THREE.Vector3(0, 1.7, 5.2), camLook = new THREE.Vector3(0, 1.5, 0);
+const wantPos = new THREE.Vector3(), wantLook = new THREE.Vector3(), tmpV = new THREE.Vector3();
+let last = performance.now(), fade = 0, fadeDir = 0;
+
+function wrapText(c, text, maxW) {
+  const words = text.split(/\s+/), lines = []; let line = '';
+  for (const w of words) { const test = line ? line + ' ' + w : w; if (c.measureText(test).width > maxW && line) { lines.push(line); line = w; } else line = test; }
+  if (line) lines.push(line); return lines;
+}
+
+function animateChar(o, talk, fx, time, moving, isFocus) {
+  const g = o.group, ph = o.ph;
+  g.position.set(o.x, -.54 * (1 - o.s) + Math.sin(time * 1.6 + ph) * .02 + (moving ? Math.abs(Math.sin(time * 9 + ph)) * .09 : 0), 0);
+  g.scale.setScalar(o.s);
+  g.rotation.y = isFocus ? Math.sin(time * .7 + ph) * .08 : clamp((fx - o.x) * .12, -.5, .5);
+  const head = o.head;
+  head.rotation.y = Math.sin(time * 1.1 + ph) * .12 * (.4 + talk);
+  head.rotation.x = Math.sin(time * 2.3 + ph) * .05 + talk * .08;
+  head.position.y = 2.35 + Math.sin(time * 2 + ph) * .02 + talk * .03;
+  o.mouth.scale.set(.75 + mouthWide * .7 * (talk > .02 ? 1 : .3), .1 + talk * 1.1, .4 + talk * .3);
+  const swing = Math.sin(time * 3.2 + ph) * talk;
+  o.armR.rotation.z = .15 + talk * .5 + swing * .4; o.armR.rotation.x = -talk * .9 - Math.sin(time * 2.6 + ph) * talk * .3;
+  o.armL.rotation.z = -.15 - talk * .35 - Math.sin(time * 2.9 + 1 + ph) * talk * .3; o.armL.rotation.x = -talk * .5;
+  if (o.trunk) o.trunk.rotation.x = .2 + talk * .35 * Math.sin(time * 12);
+  const bl = Math.sin(time * 1.3 + ph * 3) > .985 ? .1 : 1;
+  o.eyes.forEach(e => { e.scale.y = bl; });
+}
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(.05, (now - last) / 1000); last = now;
+  const t = playing && actx ? Math.max(0, actx.currentTime - startedAt) : 0;
+  const time = now / 1000;
+
+  // audio -> mouth
+  let level = 0, centroid = .5;
+  if (playing && analyser) {
+    analyser.getByteTimeDomainData(timeData);
+    let sum = 0; for (let i = 0; i < timeData.length; i++) { const v = (timeData[i] - 128) / 128; sum += v * v; }
+    level = Math.min(1, Math.sqrt(sum / timeData.length) * 4.5);
+    analyser.getByteFrequencyData(freqData);
+    let a = 0, b = 0; for (let i = 2; i < 120; i++) { a += i * freqData[i]; b += freqData[i]; }
+    centroid = b > 0 ? Math.min(1, Math.max(0, (a / b - 8) / 40)) : .5;
+  }
+  mouthOpen += (level - mouthOpen) * Math.min(1, dt * 18);
+  mouthWide += (centroid - mouthWide) * Math.min(1, dt * 10);
+
+  // which scene / cast / speaker
+  const sIdx = sceneIndexAt(t), sc = scenes[sIdx] || scenes[0], cast = sceneCast[sIdx] || [];
+  const ci = cueIndexAt(t);
+  if (ci >= 0 && cueMeta[ci] && cueMeta[ci].length) focusId = cueMeta[ci][0];
+  if (!cast.includes(focusId)) focusId = cast[0] || null;
+
+  // environment swap with dip-to-black
+  if (envLoc === null) buildEnv(sc.loc);
+  else if (sc.loc !== envLoc && fadeDir === 0) fadeDir = 1;
+  if (fadeDir === 1) { fade = Math.min(1, fade + dt * 5); if (fade >= 1) { buildEnv(sc.loc); fadeDir = -1; } }
+  else if (fadeDir === -1) { fade = Math.max(0, fade - dt * 5); if (fade <= 0) { fadeDir = 0; fade = 0; } }
+  spaceA += ((envLoc === 'space' ? 1 : 0) - spaceA) * Math.min(1, dt * 6);
+
+  // time of day
+  const target = TVT[sc.time] || TVT.day;
+  if (!tvInit) { snapTV(target); tvInit = true; } else stepTV(target, dt);
+  hemi.color.copy(tv.hemi); hemi.groundColor.copy(tv.gnd); hemi.intensity = tv.hi;
+  sunL.color.copy(tv.sun); sunL.intensity = tv.si;
+  glowNow = clamp((tv.night - .25) * 1.4, 0, 1);
+  winMats.forEach(m => { m.emissiveIntensity = glowNow * (m.userData.k || 1); });
+  if (homeGlass) homeGlass.color.copy(tv.bot).lerp(tv.top, .5);
+  animated.forEach(fn => fn(time, dt));
+
+  // characters
+  const n = cast.length || 1, vert = H > W, spacing = vert ? 1.5 : 2.1;
+  const cs = n >= 3 ? (vert ? .78 : .85) : (n === 2 ? .92 : 1);
+  let fx = 0;
+  const focusChar = chars.find(c => c.id === focusId);
+  if (focusChar && focusChar.obj) fx = focusChar.obj.x;
+  for (const c of chars) {
+    const o = c.obj; if (!o) continue;
+    const idx = cast.indexOf(c.id), inCast = idx >= 0;
+    const tx = inCast ? (idx - (n - 1) / 2) * spacing : (o.x < 0 ? -8 : 8);
+    if (inCast && !o.group.visible) { o.x = tx < 0 ? -8 : 8; o.group.visible = true; }
+    if (!o.group.visible) continue;
+    o.x += (tx - o.x) * Math.min(1, dt * 3);
+    const moving = Math.abs(tx - o.x) > .06;
+    if (!inCast && Math.abs(o.x) > 7.2) { o.group.visible = false; continue; }
+    o.s += (cs - o.s) * Math.min(1, dt * 4);
+    const isFocus = inCast && c.id === focusId;
+    animateChar(o, isFocus ? mouthOpen : 0, fx, time, moving, isFocus);
+  }
+
+  // camera
+  let key = sc.cam;
+  if (key === 'auto') {
+    if (t - sc.start < 2.2 || !playing) key = 'wide';
+    else if (n > 1) key = 'front';
+    else key = ['front', 'close', 'left', 'right'][Math.max(0, ci) % 4];
+  }
+  const cp = CAMS[key] || CAMS.front, k = vert ? 1.45 : 1, zoom = vert ? 1 + .28 * (n - 1) : 1 + .1 * (n - 1);
+  wantPos.set(fx * .5 + cp.p[0] * k * zoom, cp.p[1], cp.p[2] * k * zoom);
+  wantLook.set(fx * .5 + cp.l[0], cp.l[1], 0);
+  camPos.lerp(wantPos, 1 - Math.exp(-dt * 3)); camLook.lerp(wantLook, 1 - Math.exp(-dt * 3));
+  camera.position.copy(camPos);
+  camera.position.x += Math.sin(time * .4) * .08;
+  camera.lookAt(camLook);
+
+  renderer.render(scene3, camera);
+
+  // composite: sky + 3D + name tags + fade + subtitles
+  drawSky(time);
+  ctx2d.drawImage(renderer.domElement, 0, 0, W, H);
+
+  if (n > 1) {
+    const fs = 26 * (W / 720);
+    ctx2d.font = `700 ${fs}px "Noto Sans Devanagari", system-ui, sans-serif`;
+    ctx2d.textAlign = 'center'; ctx2d.textBaseline = 'middle';
+    for (const id of cast) {
+      const c = chars.find(x => x.id === id); if (!c || !c.obj || !c.obj.group.visible) continue;
+      c.obj.head.getWorldPosition(tmpV); tmpV.y += 1.0 * c.obj.s; tmpV.project(camera);
+      const px = (tmpV.x * .5 + .5) * W, py = (-tmpV.y * .5 + .5) * H, tw = ctx2d.measureText(c.name).width + fs * .9;
+      ctx2d.fillStyle = id === focusId ? 'rgba(255,122,69,.95)' : 'rgba(0,0,0,.55)';
+      ctx2d.beginPath(); ctx2d.roundRect ? ctx2d.roundRect(px - tw / 2, py - fs * .7, tw, fs * 1.4, fs * .7) : ctx2d.rect(px - tw / 2, py - fs * .7, tw, fs * 1.4); ctx2d.fill();
+      ctx2d.fillStyle = id === focusId ? '#111' : '#fff'; ctx2d.fillText(c.name, px, py + 1);
+    }
+  }
+  if (fade > 0) { ctx2d.fillStyle = `rgba(0,0,0,${fade})`; ctx2d.fillRect(0, 0, W, H); }
+
+  let capText = '';
+  if ($('capOn').checked) {
+    const lang = $('capLang').value;
+    if (lang === 'en' && cuesEn.length) { const ec = cuesEn.find(c => t >= c.s && t <= c.e); capText = ec ? ec.t : ''; }
+    else { const oc = cues.find(c => t >= c.s && t <= c.e); capText = oc ? (lang === 'orig' ? oc.t : toHinglish(oc.t)) : ''; }
+  }
+  if (capText && playing) {
+    const fs = +$('subSize').value * (W / 720);
+    ctx2d.font = `800 ${fs}px "Noto Sans Devanagari", system-ui, sans-serif`;
+    ctx2d.textAlign = 'center'; ctx2d.textBaseline = 'middle';
+    const lines = wrapText(ctx2d, capText, W * .86), lh = fs * 1.25;
+    let y = H - H * .1 - (lines.length - 1) * lh;
+    ctx2d.lineJoin = 'round'; ctx2d.lineWidth = fs * .22; ctx2d.strokeStyle = '#000'; ctx2d.fillStyle = '#fff';
+    for (const l of lines) { ctx2d.strokeText(l, W / 2, y); ctx2d.fillText(l, W / 2, y); y += lh; }
+  }
+
+  if (recording && buffer) $('prog').value = Math.min(1, t / buffer.duration);
+}
+
+/* ---------- init ---------- */
+chars = [newChar('Narrator', 'man', 0, [], 0)];
+chars.forEach(buildObj);
+renderChars();
+refresh();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
